@@ -19,10 +19,55 @@ DATA_PATH = Path(__file__).resolve().parent / "clean_sales_data.csv"
 @st.cache_data
 def load_data() -> pd.DataFrame:
     df = pd.read_csv(DATA_PATH)
-    df["Date"] = pd.to_datetime(df["Date"])
-    df["Month_Name"] = pd.Categorical(
-        df["Month_Name"], categories=MONTH_ORDER, ordered=True
+
+    # Some exports wrap each CSV row in quotes, which makes pandas ingest the
+    # entire row as a single column. If that happens, split the row manually.
+    if len(df.columns) == 1:
+        raw_rows = pd.Series([df.columns[0], *df.iloc[:, 0].astype(str).tolist()])
+        split_rows = raw_rows.str.replace('"', "", regex=False).str.split(",", expand=True)
+        split_rows.columns = split_rows.iloc[0].str.strip()
+        df = split_rows.iloc[1:].reset_index(drop=True)
+
+    df.columns = (
+        pd.Index(df.columns)
+        .astype(str)
+        .str.strip()
+        .str.replace('"', "", regex=False)
     )
+
+    required_columns = [
+        "Sales Person",
+        "Country",
+        "Product",
+        "Date",
+        "Amount",
+        "Boxes Shipped",
+    ]
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        raise ValueError(f"Missing required columns: {', '.join(missing_columns)}")
+
+    df = df.dropna(subset=["Date"]).copy()
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df = df.dropna(subset=["Date"]).copy()
+    df["Amount"] = pd.to_numeric(df["Amount"], errors="coerce")
+    df["Boxes Shipped"] = pd.to_numeric(df["Boxes Shipped"], errors="coerce")
+    if "Revenue_per_Box" in df.columns:
+        df["Revenue_per_Box"] = pd.to_numeric(df["Revenue_per_Box"], errors="coerce")
+    df = df.dropna(subset=["Amount", "Boxes Shipped"]).copy()
+
+    if "Month" not in df.columns:
+        df["Month"] = df["Date"].dt.month
+    else:
+        df["Month"] = pd.to_numeric(df["Month"], errors="coerce").fillna(df["Date"].dt.month)
+
+    if "Month_Name" not in df.columns:
+        df["Month_Name"] = df["Date"].dt.month_name()
+
+    if "Revenue_per_Box" not in df.columns:
+        df["Revenue_per_Box"] = df["Amount"] / df["Boxes Shipped"].replace(0, pd.NA)
+
+    df["Month_Name"] = pd.Categorical(df["Month_Name"], categories=MONTH_ORDER, ordered=True)
     return df
 
 
