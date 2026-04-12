@@ -79,6 +79,10 @@ def format_percent(value: float) -> str:
     return f"{value * 100:.1f}%"
 
 
+def safe_divide(numerator: float, denominator: float) -> float:
+    return numerator / denominator if denominator else 0.0
+
+
 def concentration_label(top_share: float) -> str:
     if top_share >= 0.4:
         return "High concentration"
@@ -229,7 +233,7 @@ observed_months = max(period_months, 1)
 total_revenue = filtered_df["Amount"].sum()
 total_boxes = filtered_df["Boxes Shipped"].sum()
 avg_order_value = filtered_df["Amount"].mean()
-avg_revenue_per_box = filtered_df["Revenue_per_Box"].mean()
+avg_revenue_per_box = safe_divide(total_revenue, total_boxes)
 annualized_revenue = total_revenue * (12 / observed_months)
 estimated_ebitda_margin = gross_margin - opex_ratio
 estimated_ebitda = annualized_revenue * estimated_ebitda_margin
@@ -245,12 +249,11 @@ monthly["Previous Revenue"] = monthly["Amount"].shift(1)
 monthly["Growth Rate"] = (
     (monthly["Amount"] - monthly["Previous Revenue"]) / monthly["Previous Revenue"]
 )
-
 latest_month_revenue = monthly["Amount"].iloc[-1]
-first_month_revenue = monthly["Amount"].iloc[0]
+previous_month_revenue = monthly["Previous Revenue"].iloc[-1] if len(monthly) > 1 else pd.NA
 run_rate_growth = (
-    (latest_month_revenue - first_month_revenue) / first_month_revenue
-    if first_month_revenue
+    safe_divide(latest_month_revenue - previous_month_revenue, previous_month_revenue)
+    if pd.notna(previous_month_revenue)
     else 0.0
 )
 
@@ -269,10 +272,12 @@ product_mix = (
     .agg(
         Revenue=("Amount", "sum"),
         Boxes=("Boxes Shipped", "sum"),
-        Revenue_per_Box=("Revenue_per_Box", "mean"),
     )
     .reset_index()
     .sort_values("Revenue", ascending=False)
+)
+product_mix["Revenue_per_Box"] = product_mix.apply(
+    lambda row: safe_divide(row["Revenue"], row["Boxes"]), axis=1
 )
 top_product_share = product_mix["Revenue"].iloc[0] / total_revenue
 
@@ -317,10 +322,10 @@ col2.metric(
 )
 col3.metric("Avg Revenue / Box", format_currency(avg_revenue_per_box))
 col4.metric(
-    "Run-rate Growth",
+    "Monthly Growth",
     format_percent(run_rate_growth),
     delta=(
-        f"vs {monthly['Month_Label'].iloc[0]}"
+        f"vs {monthly['Month_Label'].iloc[-2]}"
         if len(monthly) > 1
         else "single-month selection"
     ),
@@ -400,7 +405,9 @@ with overview_tab:
             st.caption(
                 f"Interpretation: this line now shows actual calendar months. "
                 f"Best month was {best_month['Month_Label']} at {format_currency(best_month['Amount'])}, "
-                f"while the weakest month was {weakest_month['Month_Label']} at {format_currency(weakest_month['Amount'])}."
+                f"while the weakest month was {weakest_month['Month_Label']} at {format_currency(weakest_month['Amount'])}. "
+                f"The latest month, {monthly['Month_Label'].iloc[-1]}, changed by {format_percent(run_rate_growth)} "
+                f"against the previous active month."
             )
         else:
             st.caption(
