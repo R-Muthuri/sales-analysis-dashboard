@@ -144,6 +144,23 @@ st.markdown(
         font-size: 0.95rem;
         margin-bottom: 0;
     }
+    div[data-testid="stMetric"] {
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid rgba(148, 163, 184, 0.22);
+        border-radius: 16px;
+        padding: 0.9rem 1rem;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+    }
+    div[data-testid="stMetricLabel"] {
+        color: #475569;
+        font-weight: 600;
+    }
+    div[data-testid="stMetricValue"] {
+        color: #0f172a;
+    }
+    div[data-testid="stMetricDelta"] {
+        color: #1d4ed8;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -218,11 +235,12 @@ estimated_ebitda_margin = gross_margin - opex_ratio
 estimated_ebitda = annualized_revenue * estimated_ebitda_margin
 
 monthly = (
-    filtered_df.groupby(["Month", "Month_Name"], observed=False)["Amount"]
+    filtered_df.assign(Month_Start=filtered_df["Date"].dt.to_period("M").dt.to_timestamp())
+    .groupby("Month_Start", as_index=False)["Amount"]
     .sum()
-    .reset_index()
-    .sort_values("Month")
+    .sort_values("Month_Start")
 )
+monthly["Month_Label"] = monthly["Month_Start"].dt.strftime("%b %Y")
 monthly["Previous Revenue"] = monthly["Amount"].shift(1)
 monthly["Growth Rate"] = (
     (monthly["Amount"] - monthly["Previous Revenue"]) / monthly["Previous Revenue"]
@@ -287,10 +305,26 @@ bear_case = summarize_case(
 scenario_df = pd.DataFrame([bear_case, base_case, bull_case])
 
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Annualized Revenue", format_currency(annualized_revenue))
-col2.metric("Estimated EBITDA", format_currency(estimated_ebitda))
+col1.metric(
+    "Annualized Revenue",
+    format_currency(annualized_revenue),
+    delta=f"{observed_months} months observed",
+)
+col2.metric(
+    "Estimated EBITDA",
+    format_currency(estimated_ebitda),
+    delta=f"at {format_percent(estimated_ebitda_margin)} margin",
+)
 col3.metric("Avg Revenue / Box", format_currency(avg_revenue_per_box))
-col4.metric("Run-rate Growth", format_percent(run_rate_growth))
+col4.metric(
+    "Run-rate Growth",
+    format_percent(run_rate_growth),
+    delta=(
+        f"vs {monthly['Month_Label'].iloc[0]}"
+        if len(monthly) > 1
+        else "single-month selection"
+    ),
+)
 
 col5, col6, col7, col8 = st.columns(4)
 col5.metric("Total Revenue", format_currency(total_revenue))
@@ -346,15 +380,32 @@ with overview_tab:
     with chart_col:
         fig_revenue = px.line(
             monthly,
-            x="Month_Name",
+            x="Month_Start",
             y="Amount",
             markers=True,
             title="Monthly Revenue Trend",
-            labels={"Amount": "Revenue", "Month_Name": "Month"},
+            labels={"Amount": "Revenue", "Month_Start": "Month"},
         )
         fig_revenue.update_traces(line_color="#1d4ed8", marker_color="#ea580c")
-        fig_revenue.update_layout(yaxis_tickprefix="$", hovermode="x unified")
+        fig_revenue.update_layout(
+            yaxis_tickprefix="$",
+            hovermode="x unified",
+            xaxis=dict(tickformat="%b %Y"),
+        )
         st.plotly_chart(fig_revenue, use_container_width=True)
+
+        if len(monthly) > 1:
+            best_month = monthly.loc[monthly["Amount"].idxmax()]
+            weakest_month = monthly.loc[monthly["Amount"].idxmin()]
+            st.caption(
+                f"Interpretation: this line now shows actual calendar months. "
+                f"Best month was {best_month['Month_Label']} at {format_currency(best_month['Amount'])}, "
+                f"while the weakest month was {weakest_month['Month_Label']} at {format_currency(weakest_month['Amount'])}."
+            )
+        else:
+            st.caption(
+                "Interpretation: the current filters leave only one active month, so there is no trend yet to compare across time."
+            )
 
     with mix_col:
         fig_country = px.pie(
