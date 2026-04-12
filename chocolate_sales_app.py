@@ -111,15 +111,32 @@ if uploaded_file is None:
 # ── Load & Clean Data ─────────────────────────────────────────────────────────
 @st.cache_data
 def load_data(file):
-    df = pd.read_csv(file)
-    # Normalize column names: strip whitespace and fix casing
-    df.columns = df.columns.str.strip()
+    df = pd.read_csv(file, encoding='utf-8-sig', engine='python')
+    # Strip whitespace and carriage returns from column names
+    df.columns = df.columns.str.strip().str.replace(r'\r', '', regex=True)
+    # If all data landed in one column, the CSV is comma-quoted — re-parse it
+    if len(df.columns) == 1:
+        import io
+        file.seek(0)
+        raw = file.read()
+        if isinstance(raw, bytes):
+            raw = raw.decode('utf-8-sig')
+        raw = raw.replace('\r\n', '\n').replace('\r', '\n')
+        # Remove surrounding quotes from each line
+        lines = []
+        for line in raw.splitlines():
+            line = line.strip()
+            if line.startswith('"') and line.endswith('"'):
+                line = line[1:-1]
+            lines.append(line)
+        df = pd.read_csv(io.StringIO('\n'.join(lines)))
+        df.columns = df.columns.str.strip()
     # Flexible column rename — match regardless of case
     col_map = {c: c for c in df.columns}
     expected = ['Sales Person', 'Country', 'Product', 'Date', 'Amount', 'Boxes Shipped']
     for exp in expected:
         for actual in df.columns:
-            if actual.lower() == exp.lower() and actual != exp:
+            if actual.lower().strip() == exp.lower() and actual != exp:
                 col_map[actual] = exp
     df = df.rename(columns=col_map)
     df['Amount'] = df['Amount'].replace(r'[\$,]', '', regex=True).astype(float)
