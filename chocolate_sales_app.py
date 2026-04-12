@@ -112,6 +112,16 @@ if uploaded_file is None:
 @st.cache_data
 def load_data(file):
     df = pd.read_csv(file)
+    # Normalize column names: strip whitespace and fix casing
+    df.columns = df.columns.str.strip()
+    # Flexible column rename — match regardless of case
+    col_map = {c: c for c in df.columns}
+    expected = ['Sales Person', 'Country', 'Product', 'Date', 'Amount', 'Boxes Shipped']
+    for exp in expected:
+        for actual in df.columns:
+            if actual.lower() == exp.lower() and actual != exp:
+                col_map[actual] = exp
+    df = df.rename(columns=col_map)
     df['Amount'] = df['Amount'].replace(r'[\$,]', '', regex=True).astype(float)
     df['Date'] = pd.to_datetime(df['Date'], dayfirst=True)
     df = df.drop_duplicates()
@@ -122,7 +132,14 @@ def load_data(file):
     df['Revenue_per_Box'] = df['Amount'] / df['Boxes Shipped']
     return df
 
-df = load_data(uploaded_file)
+try:
+    df = load_data(uploaded_file)
+except KeyError as e:
+    st.error(f"Column not found: {e}. Please check your CSV has these columns: Sales Person, Country, Product, Date, Amount, Boxes Shipped")
+    st.stop()
+except Exception as e:
+    st.error(f"Could not load file: {e}")
+    st.stop()
 
 # ── Sidebar Filters ───────────────────────────────────────────────────────────
 with st.sidebar:
